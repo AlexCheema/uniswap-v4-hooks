@@ -14,11 +14,12 @@ import {TickMath} from "@uniswap/v4-core/contracts/libraries/TickMath.sol";
 import {PoolModifyPositionTest} from "@uniswap/v4-core/contracts/test/PoolModifyPositionTest.sol";
 import {BalanceDelta} from "@uniswap/v4-core/contracts/types/BalanceDelta.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
+import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 
 import {console} from "forge-std/console.sol";
 import {Test} from "forge-std/Test.sol";
 
-contract TestVIPHook is Test, Deployers {
+contract TestVIPHook is Test, Deployers, IERC1155Receiver {
     using PoolIdLibrary for IPoolManager.PoolKey;
 
     uint160 constant SQRT_RATIO_10_1 = 250541448375047931186413801569;
@@ -27,17 +28,15 @@ contract TestVIPHook is Test, Deployers {
     TestERC20 token1;
     PoolManager manager;
     PoolModifyPositionTest modifyPositionRouter;
-    VIPHook vipHook = VIPHook(address(uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.AFTER_SWAP_FLAG)));
+    VIPHook vipHook = VIPHook(address(uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG )));
     IPoolManager.PoolKey poolKey;
     PoolId poolId;
 
     PoolSwapTest swapRouter;
 
     function setUp() public {
-        console.log("setUp");
-
-        token0 = new TestERC20(2**128);
-        token1 = new TestERC20(2**128);
+        token0 = new TestERC20(0);
+        token1 = new TestERC20(0);
         manager = new PoolManager(500000);
 
         vm.record();
@@ -62,6 +61,8 @@ contract TestVIPHook is Test, Deployers {
         /*token0.approve(address(vipHook), type(uint256).max);
         token1.approve(address(vipHook), type(uint256).max);*/
 
+        token0.approve(address(manager), 100 ether);
+        token1.approve(address(manager), 100 ether);
         token0.approve(address(modifyPositionRouter), 100 ether);
         token1.approve(address(modifyPositionRouter), 100 ether);
         token0.approve(address(swapRouter), 100 ether);
@@ -77,26 +78,41 @@ contract TestVIPHook is Test, Deployers {
 
 
     function testPlaceholder() public {
-        console.log("testPlaceholder");
-        console.log(token0.balanceOf(address(vipHook)));
-        console.log(token0.balanceOf(address(swapRouter)));
-        console.log(token0.balanceOf(address(this)));
+        modifyPositionRouter.modifyPosition(poolKey, IPoolManager.ModifyPositionParams(-60, 300, 10 ether));
 
-        int24 tickLower = 0;
-        bool zeroForOne = true;
-        uint128 liquidity = 1000000;
-        // vipHook.place(poolKey, tickLower, zeroForOne, liquidity);
-
-        modifyPositionRouter.modifyPosition(poolKey, IPoolManager.ModifyPositionParams(-60, 60, 10 ether));
+        (, int24 tickBefore,,,,) = manager.getSlot0(poolId);
+        assertEq(tickBefore, 0);
 
         BalanceDelta balanceDelta = swapRouter.swap(
             poolKey,
             IPoolManager.SwapParams(false, 1 ether, TickMath.getSqrtRatioAtTick(60)),
-            PoolSwapTest.TestSettings(true, true)
+            PoolSwapTest.TestSettings(false, true)
         );
 
-        (, int24 tick,,,,) = manager.getSlot0(poolId);
-        assertEq(tick, 60);
+        (, int24 tickAfter,,,,) = manager.getSlot0(poolId);
+        assertEq(tickAfter, 60);
+
+        swapRouter.swap(
+            poolKey,
+            IPoolManager.SwapParams(false, 1 ether, TickMath.getSqrtRatioAtTick(120)),
+            PoolSwapTest.TestSettings(false, true)
+        );
+    }
+
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) {
+        return bytes4(keccak256("onERC1155Received(address,address,uint256,uint256,bytes)"));
+    }
+
+    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
+        external
+        pure
+        returns (bytes4)
+    {
+        return bytes4(keccak256("onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)"));
+    }
+
+    function supportsInterface(bytes4) external pure returns (bool) {
+        return true;
     }
 
 }
